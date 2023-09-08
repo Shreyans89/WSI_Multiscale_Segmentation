@@ -1,0 +1,15 @@
+{
+  "type": "Feature",
+  "geometry": {
+    "type": "MultiPoint",
+    "coordinates": []
+  },
+  "properties": {
+    "object_type": "annotation",
+    "classification": {
+      "name": "Tumor",
+      "colorRGB": -3670016
+    },
+    "isLocked": false
+  }
+}
