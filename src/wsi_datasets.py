@@ -26,19 +26,23 @@ class WSI_Pyramid(Dataset):
     
     def __init__(self,
                  anno_df:pd.DataFrame,
+                 img_df:pd.DataFrame,
                  crop_pixel_size:tuple=(512,512),
                  transform=None,
-                 class2num={'Background':0,'Tumor':1},
+                 ## accomodating Qupaths 'Other' labels
+                 class2num={'Background':0,'Tumor':1,'Other':1},
+                 anno_crop_prob=0.1,
                  
                  ## default set to show all levels, mostly {0:1} top level is picked
                  pyramid_top_level={0:1.0},
                  num_pyramid_levels=4, 
                  num_pyramid_mask_levels=1,
-                 filter_flag=False)->None:
+                 filter_flag=False,**kwargs)->None:
        
         
        
         self.anno_df=anno_df
+        self.img_df=img_df
         ## the size in pixel of  each crop -size is kept same at 
         ## various zoom levels for batching
         self.crop_pixel_size=crop_pixel_size
@@ -46,12 +50,15 @@ class WSI_Pyramid(Dataset):
         self.class2num= class2num
         ## create on self.device
         ## offsets to add to crop center to get vertices
-        self.offsets=torch.tensor(self.crop_pixel_size)//2
+        self.offsets=np.array(self.crop_pixel_size)//2
         ## get the downsample levels common in the entire dataset
         self.common_downsample_levels=min(self.anno_df['downsample_levels'],key=len)
         ## take the intersect of user provided ds levels and the ones present in the data
         self.pyramid_top_level=pyramid_top_level
         self.pyramid_all_levels=max(self.anno_df['downsample_levels'],key=len)
+        ## probability that random crop selected will be from within the annotation bound
+        ## as opposed to a crop chosen from a random image at a random location
+        self.anno_crop_prob=anno_crop_prob
 
         
         self.pyramid_top_idx=list(self.pyramid_top_level.keys())[0]
@@ -70,6 +77,28 @@ class WSI_Pyramid(Dataset):
         return len(self.anno_df)
     
     
+    
+    def sample_crop_center(self,annotation_row:pd.Series):
+          
+        if np.random.rand()<self.anno_crop_prob:
+            ## case where crop center is sampled from the annotations bounds
+            
+            minxy, maxxy=annotation_row['bounds']
+            return np.random.randint(low=np.array(minxy)-self.offsets,high=np.array(maxxy)+self.offsets)
+
+        else:
+            ## case where random crop from all possible issue locs from the same image
+            tissue_locs=self.img_df.set_index('image_name',inplace=False).loc[annotation_row['image_name']]['tissue_location']
+            return  tissue_locs[np.random.randint(low=0,high=len(tissue_locs))]+self.offsets
+
+            
+                
+            
+            
+            
+           
+        
+    
     def get_pyramid_crops(self,annotation_row:pd.Series):
         
         """ get a random center crop at any possible zoom level from the periphery
@@ -81,8 +110,8 @@ class WSI_Pyramid(Dataset):
         wsi_size,anno_coordinates=(np.array(x) for x in [annotation_row['WSI_size'],
                                                              annotation_row['coordinates']])
 
-        random_crop_index=np.random.randint(0,len(anno_coordinates))
-        random_crop_center=torch.tensor(anno_coordinates[random_crop_index])
+       
+        random_crop_center=torch.tensor(self.sample_crop_center(annotation_row))
         # pdb.set_trace()
         offsets_arr=torch.tensor([[-1,1],[1,1],[1,-1],[-1,-1]])*self.offsets   # 4 X 2
         downsample_arr=torch.tensor(list(self.pyramid_zoom_levels.values())).unsqueeze(1).unsqueeze(1)
@@ -94,9 +123,7 @@ class WSI_Pyramid(Dataset):
         pyramid_top_lefts=pyramid_crops.min(axis=1)   # Pyramid_Levels X 2
       
        
-        ## get the top left of every sampled level in the pyramidal tiff by subtracting offset from crop center and scaling by downsample factor
-        #sampled_top_lefts={idx:random_crop_center-self.offsets*d_factor for idx,d_factor in self.pyramid_zoom_levels.items()}
-
+        ## get the top left of every sampled level in the pyr
         return pyramid_crops,pyramid_top_lefts
 
 
@@ -176,7 +203,7 @@ class WSI_Pyramid(Dataset):
     def read_slide_region(self,slide_obj:openslide.OpenSlide,top_left:np.ndarray,
                          level:int):
         """ returns the pixel RGB from WSI given a location,crop_size and level"""
-        #pdb.set_trace()
+       
         return slide_obj.read_region(tuple(top_left.astype(np.int32)),level,self.crop_pixel_size)
 
     def get_dl(self,batch_size,kind,shuffle=True):
@@ -185,9 +212,11 @@ class WSI_Pyramid(Dataset):
         return DataLoader(dataset=self,batch_size=batch_size,shuffle=shuffle)
 
     def get_img_T(self,pyramid_top_lefts:np.ndarray,image_path:pathlib.Path):
+        
 
         img_T=np.concatenate([np.array(self.read_slide_region(openslide.OpenSlide(image_path),sampled_top_left,zoom_level))[:,:,:-1] 
                   for zoom_level,sampled_top_left in zip(self.pyramid_zoom_levels,pyramid_top_lefts)],axis=2)
+    
         img_T=torch.tensor(img_T).permute(2,0,1)
         return img_T
         

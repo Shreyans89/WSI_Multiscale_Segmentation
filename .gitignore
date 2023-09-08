@@ -3,4 +3,5 @@ openslide-win64-20230414/
 .ipynb_checkpoints/
 *.tiff
 *.geojson
-
+*.jpg
+lightning_logs/

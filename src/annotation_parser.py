@@ -1,4 +1,5 @@
 from __future__ import annotations
+from shapely.geometry import Polygon
 import pandas as pd
 from pathlib import Path
 import pathlib
@@ -7,7 +8,7 @@ import numpy as np
 from typing import Tuple
 import json
 import pdb
-from shapely.geometry import Polygon,MultiPolygon
+
 
 
 
@@ -65,6 +66,8 @@ class AnnotationParser():
                 largest_poly= max([max([np.array(poly).reshape((np.array(poly).shape)[-2:]) for poly in coords],key=len) 
                                    for coords in coord_list],key=len)
 
+           
+            
             return largest_poly
 
         
